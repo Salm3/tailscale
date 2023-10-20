@@ -39,8 +39,10 @@ type commandInfo struct {
 }
 
 var serveHelpCommon = strings.TrimSpace(`
-<target> can be a port number (e.g., 3000), a partial URL (e.g., localhost:3000), or a
-full URL including a path (e.g., http://localhost:3000/foo, https+insecure://localhost:3000/foo).
+<target> can be a file, directory, text, or most commonly the location to a service
+running on the local machine. The location to the location service can be expressed
+as a port number (e.g., 3000), a partial URL (e.g., localhost:3000), or a full URL
+including a path (e.g., http://localhost:3000/foo, https+insecure://localhost:3000/foo).
 
 EXAMPLES
   - Mount a local web server at 127.0.0.1:3000 in the foreground:
@@ -115,12 +117,12 @@ func newServeV2Command(e *serveEnv, subcmd serveMode) *ffcli.Command {
 		Exec:     e.runServeCombined(subcmd),
 
 		FlagSet: e.newFlags("serve-set", func(fs *flag.FlagSet) {
-			fs.BoolVar(&e.bg, "bg", false, "run the command in the background")
-			fs.StringVar(&e.setPath, "set-path", "", "set a path for a specific target and run in the background")
-			fs.StringVar(&e.https, "https", "", "default; HTTPS listener")
-			fs.StringVar(&e.http, "http", "", "HTTP listener")
-			fs.StringVar(&e.tcp, "tcp", "", "TCP listener")
-			fs.StringVar(&e.tlsTerminatedTCP, "tls-terminated-tcp", "", "TLS terminated TCP listener")
+			fs.BoolVar(&e.bg, "bg", false, "run as a background process")
+			fs.StringVar(&e.setPath, "set-path", "", "appends the specified path to the base URL for accessing the underlying service")
+			fs.StringVar(&e.https, "https", "", "default; expose an HTTPS server at the specified port")
+			fs.StringVar(&e.http, "http", "", "expose an HTTP server at the specified port")
+			fs.StringVar(&e.tcp, "tcp", "", "expose a TCP forwarder to forward raw TCP packets at the specified port")
+			fs.StringVar(&e.tlsTerminatedTCP, "tls-terminated-tcp", "", "expose a TCP forwarder to forward TLS-terminated TCP packets at the specified port")
 
 		}),
 		UsageFunc: usageFunc,
@@ -190,14 +192,6 @@ func (e *serveEnv) runServeCombined(subcmd serveMode) execFunc {
 		mount, err := cleanURLPath(e.setPath)
 		if err != nil {
 			return fmt.Errorf("failed to clean the mount point: %w", err)
-		}
-
-		if e.setPath != "" {
-			// TODO(marwan-at-work): either
-			// 1. Warn the user that this is a side effect.
-			// 2. Force the user to pass --bg
-			// 3. Allow set-path to be in the foreground.
-			e.bg = true
 		}
 
 		srvType, srvPort, err := srvTypeAndPortFromFlags(e)
@@ -381,7 +375,7 @@ func (e *serveEnv) setServe(sc *ipn.ServeConfig, st *ipnstate.Status, dnsName st
 var (
 	msgFunnelAvailable     = "Available on the internet:"
 	msgServeAvailable      = "Available within your tailnet:"
-	msgRunningInBackground = "Serve started and running in the background."
+	msgRunningInBackground = "%s started and running in the background."
 	msgDisableProxy        = "To disable the proxy, run: tailscale %s --%s=%d off"
 	msgToExit              = "Press Ctrl+C to exit."
 )
@@ -398,7 +392,7 @@ func (e *serveEnv) messageForPort(sc *ipn.ServeConfig, st *ipnstate.Status, dnsN
 	} else {
 		output.WriteString(msgServeAvailable)
 	}
-	output.WriteString("\n")
+	output.WriteString("\n\n")
 
 	scheme := "https"
 	if sc.IsServingHTTP(srvPort) {
@@ -410,8 +404,6 @@ func (e *serveEnv) messageForPort(sc *ipn.ServeConfig, st *ipnstate.Status, dnsN
 		scheme == "https" && srvPort == 443 {
 		portPart = ""
 	}
-
-	output.WriteString(fmt.Sprintf("%s://%s%s\n\n", scheme, dnsName, portPart))
 
 	if !e.bg {
 		output.WriteString(msgToExit)
@@ -439,15 +431,17 @@ func (e *serveEnv) messageForPort(sc *ipn.ServeConfig, st *ipnstate.Status, dnsN
 		sort.Slice(mounts, func(i, j int) bool {
 			return len(mounts[i]) < len(mounts[j])
 		})
-		maxLen := len(mounts[len(mounts)-1])
 
 		for _, m := range mounts {
 			h := sc.Web[hp].Handlers[m]
 			t, d := srvTypeAndDesc(h)
-			output.WriteString(fmt.Sprintf("%s %s%s %-5s %s\n", "|--", m, strings.Repeat(" ", maxLen-len(m)), t, d))
+
+			output.WriteString(fmt.Sprintf("%s://%s%s%s\n", scheme, dnsName, portPart, m))
+			output.WriteString(fmt.Sprintf("%s %-5s %s\n\n", "|--", t, d))
 		}
 	} else if sc.TCP[srvPort] != nil {
 		h := sc.TCP[srvPort]
+		output.WriteString(fmt.Sprintf("%s://%s%s\n", scheme, dnsName, portPart))
 
 		tlsStatus := "TLS over TCP"
 		if h.TerminateTLS != "" {
@@ -463,10 +457,9 @@ func (e *serveEnv) messageForPort(sc *ipn.ServeConfig, st *ipnstate.Status, dnsN
 	}
 
 	subCmd := infoMap[e.subcmd].Name
-	subCmdSentance := strings.ToUpper(string(subCmd[0])) + subCmd[1:]
+	subCmdUpper := strings.ToUpper(string(subCmd[0])) + subCmd[1:]
 
-	output.WriteString("\n")
-	output.WriteString(fmt.Sprintf(msgRunningInBackground, subCmdSentance))
+	output.WriteString(fmt.Sprintf(msgRunningInBackground, subCmdUpper))
 	output.WriteString("\n")
 	output.WriteString(fmt.Sprintf(msgDisableProxy, subCmd, srvType.String(), srvPort))
 
@@ -492,7 +485,7 @@ func (e *serveEnv) applyWebServe(sc *ipn.ServeConfig, dnsName string, srvPort ui
 		target = filepath.Clean(target)
 		fi, err := os.Stat(target)
 		if err != nil {
-			return errors.New("invalid path")
+			return fmt.Errorf("invalid path: %v", err)
 		}
 
 		// TODO: need to understand this further
