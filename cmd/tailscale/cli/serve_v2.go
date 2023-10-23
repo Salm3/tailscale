@@ -125,8 +125,12 @@ func newServeV2Command(e *serveEnv, subcmd serveMode) *ffcli.Command {
 			fs.BoolVar(&e.bg, "bg", false, "Run the command as a background process")
 			fs.StringVar(&e.setPath, "set-path", "", "Appends the specified path to the base URL for accessing the underlying service")
 			fs.StringVar(&e.https, "https", "", "Expose an HTTPS server at the specified port (default")
-			fs.StringVar(&e.http, "http", "", "Expose an HTTP server at the specified port")
-			fs.StringVar(&e.tcp, "tcp", "", "Expose a TCP forwarder to forward raw TCP packets at the specified port")
+
+			if e.subcmd == serve {
+				fs.StringVar(&e.http, "http", "", "Expose an HTTP server at the specified port")
+				fs.StringVar(&e.tcp, "tcp", "", "Expose a TCP forwarder to forward raw TCP packets at the specified port")
+			}
+
 			fs.StringVar(&e.tlsTerminatedTCP, "tls-terminated-tcp", "", "Expose a TCP forwarder to forward TLS-terminated TCP packets at the specified port")
 			fs.BoolVar(&e.yes, "yes", false, "Update without interactive prompts")
 		}),
