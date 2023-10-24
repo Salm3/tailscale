@@ -26,6 +26,7 @@ import (
 	"inet.af/tcpproxy"
 	"tailscale.com/client/tailscale"
 	"tailscale.com/hostinfo"
+	"tailscale.com/ipn"
 	"tailscale.com/metrics"
 	"tailscale.com/net/netutil"
 	"tailscale.com/tsnet"
@@ -76,8 +77,8 @@ func main() {
 		promoteHTTPS = fs.Bool("promote-https", true, "promote HTTP to HTTPS")
 		debugPort    = fs.Int("debug-port", 8893, "Listening port for debug/metrics endpoint")
 		hostname     = fs.String("hostname", "", "Hostname to register the service under")
+		routes       = fs.String("advertise-routes", "", "comma-separated list of IPs or prefixes to advertise as routes")
 	)
-
 	err := ff.Parse(fs, os.Args[1:], ff.WithEnvVarPrefix("TS_APPC"))
 	if err != nil {
 		log.Fatal("ff.Parse")
@@ -93,10 +94,32 @@ func main() {
 	s.ts.Hostname = *hostname
 	defer s.ts.Close()
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	lc, err := s.ts.LocalClient()
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	// Temporary 4via6 solution for request coalescing
+	if routes != nil {
+		editRoutes := new(ipn.MaskedPrefs)
+		editRoutes.AdvertiseRoutesSet = true
+		advertisedRoutes, err := netutil.CalcAdvertiseRoutes(*routes, false)
+		if err != nil {
+			log.Fatal(err)
+		}
+		editRoutes.Prefs = ipn.Prefs{
+			AdvertiseRoutes: advertisedRoutes,
+		}
+		_, err = lc.EditPrefs(ctx, editRoutes)
+		// Throw error if subnet router setup fails
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
 	s.lc = lc
 	s.initMetrics()
 
