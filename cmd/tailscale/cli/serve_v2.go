@@ -340,7 +340,7 @@ func (e *serveEnv) validateConfig(sc *ipn.ServeConfig, port uint16, wantServe se
 		return errors.New("foreground already exists under this port")
 	}
 	if !e.bg {
-		return errors.New("background serve already exists under this port")
+		return fmt.Errorf("A background configuration already exists for this port. Use `tailscale %s --%s=%d off` to remove the existing configuration.", infoMap[e.subcmd].Name, wantServe.String(), port)
 	}
 	existingServe := serveFromPortHandler(sc.TCP[port])
 	if wantServe != existingServe {

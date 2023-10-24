@@ -6,6 +6,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -108,6 +109,12 @@ func TestServeDevConfigMutations(t *testing.T) {
 				}},
 			},
 		},
+	})
+
+	// can't start foreground mode for something already in background mode
+	add(step{
+		command: cmd("funnel --http=80 localhost:3000"),
+		wantErr: exactErrMsg(errors.New("A background configuration already exists for this port. Use `tailscale funnel --http=80 off` to remove the existing configuration.")),
 	})
 
 	// using https listener with a valid port
