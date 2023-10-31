@@ -14,12 +14,28 @@ func SetOf[T comparable](slice []T) Set[T] {
 	return s
 }
 
-// Add adds e to the set.
+// Clone returns a new set cloned from the elements in s.
+func Clone[T comparable](s Set[T]) Set[T] {
+	clone := make(Set[T])
+	for e, _ := range s {
+		clone.Add(e)
+	}
+	return clone
+}
+
+// Add adds e to s.
 func (s Set[T]) Add(e T) { s[e] = struct{}{} }
 
-// AddSlice adds each element of es to the set.
+// AddSlice adds each element of es to s.
 func (s Set[T]) AddSlice(es []T) {
 	for _, e := range es {
+		s.Add(e)
+	}
+}
+
+// AddSet adds each element of es to s.
+func (s Set[T]) AddSet(es Set[T]) {
+	for e, _ := range es {
 		s.Add(e)
 	}
 }
@@ -45,3 +61,16 @@ func (s Set[T]) Contains(e T) bool {
 
 // Len reports the number of items in s.
 func (s Set[T]) Len() int { return len(s) }
+
+// Equal returns true if other is equal to s.
+func (s Set[T]) Equal(other Set[T]) bool {
+	if s.Len() != other.Len() {
+		return false
+	}
+	for e, _ := range other {
+		if !s.Contains(e) {
+			return false
+		}
+	}
+	return true
+}
